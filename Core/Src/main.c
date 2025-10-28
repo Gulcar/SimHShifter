@@ -46,7 +46,6 @@
 
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
-DMA_HandleTypeDef hdma_adc1;
 
 /* USER CODE BEGIN PV */
 
@@ -56,17 +55,15 @@ typedef struct {
 	uint8_t buttons;
 } hshifter_report_t;
 
-hshifter_report_t hshifter_report = {};
+hshifter_report_t hshifter_report = {0};
 
-uint32_t adc_values[2] = {};
-uint32_t adc_smooth_values[2] = {};
+ADC_ChannelConfTypeDef adc_channel_conf = {0};
 
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_DMA_Init(void);
 static void MX_ADC1_Init(void);
 /* USER CODE BEGIN PFP */
 
@@ -106,12 +103,14 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_DMA_Init();
   MX_ADC1_Init();
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
 
-  HAL_ADC_Start_DMA(&hadc1, adc_values, ARRAY_SIZE(adc_values));
+  HAL_ADCEx_Calibration_Start(&hadc1);
+
+  adc_channel_conf.Rank = ADC_REGULAR_RANK_1;
+  adc_channel_conf.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
 
   /* USER CODE END 2 */
 
@@ -126,9 +125,21 @@ int main(void)
 	{
 		hshifter_report.buttons = 1 << i;
 
-		if (adc_values[0] > (1 << 12) / 2)
+		adc_channel_conf.Channel = ADC_CHANNEL_1;
+		HAL_ADC_ConfigChannel(&hadc1, &adc_channel_conf);
+		HAL_ADC_Start(&hadc1);
+		HAL_ADC_PollForConversion(&hadc1, 1);
+		uint32_t analog_x = HAL_ADC_GetValue(&hadc1);
+
+		adc_channel_conf.Channel = ADC_CHANNEL_2;
+		HAL_ADC_ConfigChannel(&hadc1, &adc_channel_conf);
+		HAL_ADC_Start(&hadc1);
+		HAL_ADC_PollForConversion(&hadc1, 1);
+		uint32_t analog_y = HAL_ADC_GetValue(&hadc1);
+
+		if (analog_x > (1 << 12) / 2)
 			hshifter_report.buttons |= 1;
-		if (adc_values[1] > (1 << 12) / 2)
+		if (analog_y > (1 << 12) / 2)
 			hshifter_report.buttons |= 2;
 
 		USBD_HID_SendReport(&hUsbDeviceFS, (uint8_t*)&hshifter_report, sizeof(hshifter_report));
@@ -230,22 +241,6 @@ static void MX_ADC1_Init(void)
   /* USER CODE BEGIN ADC1_Init 2 */
 
   /* USER CODE END ADC1_Init 2 */
-
-}
-
-/**
-  * Enable DMA controller clock
-  */
-static void MX_DMA_Init(void)
-{
-
-  /* DMA controller clock enable */
-  __HAL_RCC_DMA1_CLK_ENABLE();
-
-  /* DMA interrupt init */
-  /* DMA1_Channel1_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
 
 }
 
