@@ -51,13 +51,16 @@ ADC_HandleTypeDef hadc1;
 
 extern USBD_HandleTypeDef hUsbDeviceFS;
 
+/*
+da mi tale report prov dela sem moral
+v Middlewares\ST\STM32_USB_Device_Library\Class\HID\Src\usbd_hid.c
+nastavit HID_HSHIFTER_ReportDesc (preimenovano iz HID_MOUSE_ReportDesc)
+byte tako da uporablja 7 on-off gumbov (byte zgeneriral ChatGPT)
+*/
 typedef struct {
 	uint8_t buttons;
 } hshifter_report_t;
 
-hshifter_report_t hshifter_report = {0};
-
-ADC_ChannelConfTypeDef adc_channel_conf = {0};
 
 /* USER CODE END PV */
 
@@ -71,6 +74,32 @@ static void MX_ADC1_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+// input_channel mora biti ADC_CHANNEL_X
+uint32_t AnalogRead(uint32_t input_channel, uint32_t samples)
+{
+	// da smo prijazni
+	assert_param(input_channel >= ADC_CHANNEL_0 && input_channel <= ADC_CHANNEL_17);
+	assert_param(samples < UINT32_MAX / (1<<12)); // da ne bo "sum" overflowal
+
+	ADC_ChannelConfTypeDef adc_channel_conf = {
+		.Channel = input_channel,
+		.Rank = ADC_REGULAR_RANK_1,
+		.SamplingTime = ADC_SAMPLETIME_7CYCLES_5, // ChatGPT prav da je pod 1kohm source impedance ok vrednost 1.5 ali 7.5
+	};
+
+	HAL_ADC_ConfigChannel(&hadc1, &adc_channel_conf);
+
+	uint32_t sum = 0;
+	for (uint32_t i = 0; i < samples; i++)
+	{
+		HAL_ADC_Start(&hadc1);
+		HAL_ADC_PollForConversion(&hadc1, 1);
+		sum += HAL_ADC_GetValue(&hadc1);
+	}
+
+	return sum / samples;
+}
 
 /* USER CODE END 0 */
 
@@ -109,9 +138,6 @@ int main(void)
 
   HAL_ADCEx_Calibration_Start(&hadc1);
 
-  adc_channel_conf.Rank = ADC_REGULAR_RANK_1;
-  adc_channel_conf.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
-
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -123,19 +149,11 @@ int main(void)
     /* USER CODE BEGIN 3 */
 	for (int i = 0; i < 7; i++)
 	{
+		hshifter_report_t hshifter_report;
 		hshifter_report.buttons = 1 << i;
 
-		adc_channel_conf.Channel = ADC_CHANNEL_1;
-		HAL_ADC_ConfigChannel(&hadc1, &adc_channel_conf);
-		HAL_ADC_Start(&hadc1);
-		HAL_ADC_PollForConversion(&hadc1, 1);
-		uint32_t analog_x = HAL_ADC_GetValue(&hadc1);
-
-		adc_channel_conf.Channel = ADC_CHANNEL_2;
-		HAL_ADC_ConfigChannel(&hadc1, &adc_channel_conf);
-		HAL_ADC_Start(&hadc1);
-		HAL_ADC_PollForConversion(&hadc1, 1);
-		uint32_t analog_y = HAL_ADC_GetValue(&hadc1);
+		uint32_t analog_x = AnalogRead(ADC_CHANNEL_1, 16);
+		uint32_t analog_y = AnalogRead(ADC_CHANNEL_2, 16);
 
 		if (analog_x > (1 << 12) / 2)
 			hshifter_report.buttons |= 1;
