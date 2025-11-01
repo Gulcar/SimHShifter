@@ -79,7 +79,6 @@ static void MX_USB_PCD_Init(void);
 // input_channel mora biti ADC_CHANNEL_X
 uint32_t AnalogRead(uint32_t input_channel, uint32_t samples)
 {
-	return 0;
 	// da smo prijazni
 	assert(input_channel >= ADC_CHANNEL_0 && input_channel <= ADC_CHANNEL_15);
 	assert(samples < UINT32_MAX / (1<<12)); // da ne bo "sum" overflowal
@@ -187,11 +186,12 @@ int main(void)
 		if (analog_y > (1 << 12) / 2)
 			hshifter_report.buttons |= 2;
 
-		tud_hid_gamepad_report(REPORT_ID_GAMEPAD, 0, 128, 255, 0, 0, 0, 128, hshifter_report.buttons);
+		if (tud_hid_ready())
+		{
+			tud_hid_gamepad_report(REPORT_ID_GAMEPAD, 0, 128, 255, 0, 0, 0, 128, hshifter_report.buttons);
+		}
 
 		tud_task();
-
-		HAL_Delay(500);
 	}
   }
   /* USER CODE END 3 */
