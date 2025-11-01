@@ -18,12 +18,12 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "usb_device.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
-#include "usbd_hid.h"
+#include "tusb.h"
+#include "usb_descriptors.h"
 
 /* USER CODE END Includes */
 
@@ -47,9 +47,9 @@
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
 
-/* USER CODE BEGIN PV */
+PCD_HandleTypeDef hpcd_USB_FS;
 
-extern USBD_HandleTypeDef hUsbDeviceFS;
+/* USER CODE BEGIN PV */
 
 /*
 da mi tale report prov dela sem moral
@@ -68,6 +68,7 @@ typedef struct {
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_ADC1_Init(void);
+static void MX_USB_PCD_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -78,14 +79,15 @@ static void MX_ADC1_Init(void);
 // input_channel mora biti ADC_CHANNEL_X
 uint32_t AnalogRead(uint32_t input_channel, uint32_t samples)
 {
+	return 0;
 	// da smo prijazni
-	assert_param(input_channel >= ADC_CHANNEL_0 && input_channel <= ADC_CHANNEL_17);
-	assert_param(samples < UINT32_MAX / (1<<12)); // da ne bo "sum" overflowal
+	assert(input_channel >= ADC_CHANNEL_0 && input_channel <= ADC_CHANNEL_15);
+	assert(samples < UINT32_MAX / (1<<12)); // da ne bo "sum" overflowal
 
 	ADC_ChannelConfTypeDef adc_channel_conf = {
 		.Channel = input_channel,
 		.Rank = ADC_REGULAR_RANK_1,
-		.SamplingTime = ADC_SAMPLETIME_7CYCLES_5, // ChatGPT prav da je pod 1kohm source impedance ok vrednost 1.5 ali 7.5
+		.SamplingTime = ADC_SAMPLETIME_7CYCLES_5,
 	};
 
 	HAL_ADC_ConfigChannel(&hadc1, &adc_channel_conf);
@@ -99,6 +101,25 @@ uint32_t AnalogRead(uint32_t input_channel, uint32_t samples)
 	}
 
 	return sum / samples;
+}
+
+// Invoked when the host requests data (e.g. GET_REPORT)
+uint16_t tud_hid_get_report_cb(uint8_t instance,
+                               uint8_t report_id,
+                               hid_report_type_t report_type,
+                               uint8_t* buffer,
+                               uint16_t reqlen) {
+    // Return length of data copied to buffer
+    return 0;
+}
+
+// Invoked when the host sends data (e.g. SET_REPORT)
+void tud_hid_set_report_cb(uint8_t instance,
+                           uint8_t report_id,
+                           hid_report_type_t report_type,
+                           uint8_t const* buffer,
+                           uint16_t bufsize) {
+    // Handle received data
 }
 
 /* USER CODE END 0 */
@@ -133,10 +154,16 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_ADC1_Init();
-  MX_USB_DEVICE_Init();
+  MX_USB_PCD_Init();
   /* USER CODE BEGIN 2 */
 
   HAL_ADCEx_Calibration_Start(&hadc1);
+
+  tusb_rhport_init_t dev_init = {
+   .role = TUSB_ROLE_DEVICE,
+   .speed = TUSB_SPEED_AUTO
+  };
+  tusb_init(0, &dev_init);
 
   /* USER CODE END 2 */
 
@@ -152,15 +179,17 @@ int main(void)
 		hshifter_report_t hshifter_report;
 		hshifter_report.buttons = 1 << i;
 
-		uint32_t analog_x = AnalogRead(ADC_CHANNEL_1, 16);
-		uint32_t analog_y = AnalogRead(ADC_CHANNEL_2, 16);
+		uint32_t analog_x = AnalogRead(ADC_CHANNEL_0, 16);
+		uint32_t analog_y = AnalogRead(ADC_CHANNEL_1, 16);
 
 		if (analog_x > (1 << 12) / 2)
 			hshifter_report.buttons |= 1;
 		if (analog_y > (1 << 12) / 2)
 			hshifter_report.buttons |= 2;
 
-		USBD_HID_SendReport(&hUsbDeviceFS, (uint8_t*)&hshifter_report, sizeof(hshifter_report));
+		tud_hid_gamepad_report(REPORT_ID_GAMEPAD, 0, 128, 255, 0, 0, 0, 128, hshifter_report.buttons);
+
+		tud_task();
 
 		HAL_Delay(500);
 	}
@@ -259,6 +288,37 @@ static void MX_ADC1_Init(void)
   /* USER CODE BEGIN ADC1_Init 2 */
 
   /* USER CODE END ADC1_Init 2 */
+
+}
+
+/**
+  * @brief USB Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USB_PCD_Init(void)
+{
+
+  /* USER CODE BEGIN USB_Init 0 */
+
+  /* USER CODE END USB_Init 0 */
+
+  /* USER CODE BEGIN USB_Init 1 */
+
+  /* USER CODE END USB_Init 1 */
+  hpcd_USB_FS.Instance = USB;
+  hpcd_USB_FS.Init.dev_endpoints = 8;
+  hpcd_USB_FS.Init.speed = PCD_SPEED_FULL;
+  hpcd_USB_FS.Init.low_power_enable = DISABLE;
+  hpcd_USB_FS.Init.lpm_enable = DISABLE;
+  hpcd_USB_FS.Init.battery_charging_enable = DISABLE;
+  if (HAL_PCD_Init(&hpcd_USB_FS) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USB_Init 2 */
+
+  /* USER CODE END USB_Init 2 */
 
 }
 
