@@ -39,7 +39,7 @@ enum
 
 enum
 {
-  REPORT_ID_GAMEPAD = 1,
+  REPORT_ID_HSHIFTER = 1,
   REPORT_ID_COUNT
 };
 

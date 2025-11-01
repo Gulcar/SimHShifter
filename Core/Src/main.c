@@ -52,12 +52,28 @@ PCD_HandleTypeDef hpcd_USB_FS;
 /* USER CODE BEGIN PV */
 
 /*
-da mi tale report prov dela sem moral
-v Middlewares\ST\STM32_USB_Device_Library\Class\HID\Src\usbd_hid.c
-nastavit HID_HSHIFTER_ReportDesc (preimenovano iz HID_MOUSE_ReportDesc)
-byte tako da uporablja 7 on-off gumbov (byte zgeneriral ChatGPT)
-*/
-typedef struct {
+ * Da sem usposobil TinyUSB:
+ * - dodal git submodule za tinyusb
+ * - izklopil USB_DEVICE Middleware od ST
+ * - pustil vklopljen Connectivity USB
+ * - v Connectivity USB v NVIC settings sem vklopil oba HP in LP callbacka
+ * 	 in potem v stm32f1xx_it.c v oboje dal tusb_int_handler(BOARD_TUD_RHPORT, true); return;
+ * - v mainu klicem tusb_init in potem brez karksnih koli HAL_Delay v loopu klicem tud_task
+ * - tud_hid_report ne smes klicat ce ni tud_hid_ready()
+ * - prekopiral tusb_config.h, usb_descriptors.h in usb_descriptors.c iz tinyusb/examples/device/hid_composite
+ * - v tusb_config.h nastavil CFG_TUSB_MCU, CFG_TUSB_OS, CFG_TUSB_RHPORT0_MODE
+ * - v tusb_descriptors.h pobrisal tiste report id ki jih ne rabim
+ * - v tusb_descriptors.c sem nastavil ime naprave in si postavil svoj report descriptor
+ * - iz tinyusb/hw/bsp/stm32f1/family.c sem nekam skopiral board_get_unique_id
+ * - definirat je treba se tud_hid_get_report_cb in tud_hid_set_report_cb
+ * - mogoce se kaj ampak mislim da je to to (glavni problem je bil da manjka dokumentacije, chatgpt je bil precej uporaben)
+ *
+ * https://github.com/hathach/tinyusb/discussions/633
+ * https://docs.tinyusb.org/en/latest/reference/getting_started.html
+ * https://ejaaskel.dev/making-usb-device-with-stm32-tinyusb/
+ */
+
+typedef struct __attribute__ ((packed)) {
 	uint8_t buttons;
 } hshifter_report_t;
 
@@ -188,7 +204,7 @@ int main(void)
 
 		if (tud_hid_ready())
 		{
-			tud_hid_gamepad_report(REPORT_ID_GAMEPAD, 0, 128, 255, 0, 0, 0, 128, hshifter_report.buttons);
+			tud_hid_report(REPORT_ID_HSHIFTER, (const void*)&hshifter_report, sizeof(hshifter_report_t));
 		}
 
 		tud_task();
