@@ -71,6 +71,8 @@ PCD_HandleTypeDef hpcd_USB_FS;
  * https://github.com/hathach/tinyusb/discussions/633
  * https://docs.tinyusb.org/en/latest/reference/getting_started.html
  * https://ejaaskel.dev/making-usb-device-with-stm32-tinyusb/
+ *
+ * kako sem CDC naredil hkrati kot HID pa najdi v gitu commit pa se vse vidi
  */
 
 typedef struct __attribute__ ((packed)) {
@@ -180,6 +182,9 @@ int main(void)
   };
   tusb_init(0, &dev_init);
 
+  char cdc_read_buf[64] = {0};
+  uint32_t cdc_read_buf_index = 0;
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -205,6 +210,26 @@ int main(void)
 		if (tud_hid_ready())
 		{
 			tud_hid_report(REPORT_ID_HSHIFTER, (const void*)&hshifter_report, sizeof(hshifter_report_t));
+		}
+
+		if (tud_cdc_connected() && tud_cdc_available())
+		{
+			char received = tud_cdc_read_char();
+			if ((received == '\r' || received == '\n') || cdc_read_buf_index >= sizeof(cdc_read_buf))
+			{
+				tud_cdc_write_str("\npozdravljen: ");
+				tud_cdc_write(cdc_read_buf, cdc_read_buf_index);
+				tud_cdc_write_char('\n');
+				tud_cdc_write_flush();
+				cdc_read_buf_index = 0;
+			}
+			else if (received >= 32 && received < 127)
+			{
+				cdc_read_buf[cdc_read_buf_index] = received;
+				cdc_read_buf_index++;
+				tud_cdc_write_char(received);
+				tud_cdc_write_flush();
+			}
 		}
 
 		tud_task();
