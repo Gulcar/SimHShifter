@@ -79,6 +79,21 @@ typedef struct __attribute__ ((packed)) {
 	uint8_t buttons;
 } hshifter_report_t;
 
+typedef struct {
+	uint16_t position_x;
+	uint16_t position_y;
+} gear_position_t;
+
+typedef struct {
+	gear_position_t gear_positions[6];
+	gear_position_t reverse_position;
+	gear_position_t neutral_position;
+} hshifter_config_t;
+
+hshifter_config_t hshifter_config = {0};
+
+uint32_t analog_x = 0;
+uint32_t analog_y = 0;
 
 /* USER CODE END PV */
 
@@ -139,6 +154,97 @@ void tud_hid_set_report_cb(uint8_t instance,
     // Handle received data
 }
 
+void HandleCommand(const char* cmd)
+{
+	if (strcmp(cmd, "get pos") == 0)
+	{
+		char buf[64];
+		snprintf(buf, sizeof(buf), "%lu %lu\n", analog_x, analog_y);
+		tud_cdc_write_str(buf);
+	}
+	else if (strncmp(cmd, "get ", 4) == 0 && cmd[4] >= '1' && cmd[4] <= '6' && cmd[5] == '\0')
+	{
+		int gear = cmd[4] - '1';
+		char buf[64];
+		snprintf(buf, sizeof(buf), "%u %u\n", hshifter_config.gear_positions[gear].position_x,
+				hshifter_config.gear_positions[gear].position_y);
+		tud_cdc_write_str(buf);
+	}
+	else if (strcmp(cmd, "get R") == 0)
+	{
+		char buf[64];
+		snprintf(buf, sizeof(buf), "%u %u\n", hshifter_config.reverse_position.position_x,
+				hshifter_config.reverse_position.position_y);
+		tud_cdc_write_str(buf);
+	}
+	else if (strcmp(cmd, "get N") == 0)
+	{
+		char buf[64];
+		snprintf(buf, sizeof(buf), "%u %u\n", hshifter_config.neutral_position.position_x,
+			hshifter_config.neutral_position.position_y);
+		tud_cdc_write_str(buf);
+	}
+	else if (strncmp(cmd, "set ", 4) == 0 && cmd[4] >= '1' && cmd[4] <= '6' && cmd[5] == '\0')
+	{
+		int gear = cmd[4] - '1';
+		hshifter_config.gear_positions[gear].position_x = analog_x;
+		hshifter_config.gear_positions[gear].position_y = analog_y;
+		tud_cdc_write_str("ok\n");
+	}
+	else if (strcmp(cmd, "set R") == 0)
+	{
+		hshifter_config.reverse_position.position_x = analog_x;
+		hshifter_config.reverse_position.position_y = analog_y;
+		tud_cdc_write_str("ok\n");
+	}
+	else if (strcmp(cmd, "set N") == 0)
+	{
+		hshifter_config.neutral_position.position_x = analog_x;
+		hshifter_config.neutral_position.position_y = analog_y;
+		tud_cdc_write_str("ok\n");
+	}
+	else if (strcmp(cmd, "test") == 0)
+	{
+		tud_cdc_write_str("ok\n");
+	}
+	else
+	{
+		char buf[64];
+		snprintf(buf, sizeof(buf), "invalid input '%s'\n", cmd);
+		tud_cdc_write_str(buf);
+	}
+}
+
+void HandleCDCInput()
+{
+	static char cdc_read_buf[64] = {0};
+	static uint32_t cdc_read_buf_index = 0;
+
+	char received = tud_cdc_read_char();
+
+	if ((received == '\r' || received == '\n') || cdc_read_buf_index >= sizeof(cdc_read_buf) - 1)
+	{
+		cdc_read_buf[cdc_read_buf_index] = '\0';
+		cdc_read_buf_index = 0;
+		tud_cdc_write_char('\n');
+		HandleCommand(cdc_read_buf);
+		tud_cdc_write_flush();
+	}
+	else if (received >= 32 && received < 127)
+	{
+		cdc_read_buf[cdc_read_buf_index] = received;
+		cdc_read_buf_index++;
+		tud_cdc_write_char(received);
+		tud_cdc_write_flush();
+	}
+	else if ((received == '\b' || received == 127) && cdc_read_buf_index > 0)
+	{
+		cdc_read_buf_index--;
+		tud_cdc_write_str("\b \b");
+		tud_cdc_write_flush();
+	}
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -182,9 +288,6 @@ int main(void)
   };
   tusb_init(0, &dev_init);
 
-  char cdc_read_buf[64] = {0};
-  uint32_t cdc_read_buf_index = 0;
-
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -199,8 +302,8 @@ int main(void)
 		hshifter_report_t hshifter_report;
 		hshifter_report.buttons = 1 << i;
 
-		uint32_t analog_x = AnalogRead(ADC_CHANNEL_0, 16);
-		uint32_t analog_y = AnalogRead(ADC_CHANNEL_1, 16);
+		analog_x = AnalogRead(ADC_CHANNEL_1, 16);
+		analog_y = AnalogRead(ADC_CHANNEL_0, 16);
 
 		if (analog_x > (1 << 12) / 2)
 			hshifter_report.buttons |= 1;
@@ -214,22 +317,7 @@ int main(void)
 
 		if (tud_cdc_connected() && tud_cdc_available())
 		{
-			char received = tud_cdc_read_char();
-			if ((received == '\r' || received == '\n') || cdc_read_buf_index >= sizeof(cdc_read_buf))
-			{
-				tud_cdc_write_str("\npozdravljen: ");
-				tud_cdc_write(cdc_read_buf, cdc_read_buf_index);
-				tud_cdc_write_char('\n');
-				tud_cdc_write_flush();
-				cdc_read_buf_index = 0;
-			}
-			else if (received >= 32 && received < 127)
-			{
-				cdc_read_buf[cdc_read_buf_index] = received;
-				cdc_read_buf_index++;
-				tud_cdc_write_char(received);
-				tud_cdc_write_flush();
-			}
+			HandleCDCInput();
 		}
 
 		tud_task();
