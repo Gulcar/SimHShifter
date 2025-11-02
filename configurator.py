@@ -1,4 +1,4 @@
-from PySide6.QtCore import QSize, Qt, QRect
+from PySide6.QtCore import QSize, Qt, QRect, QTimer
 from PySide6.QtWidgets import QApplication, QMainWindow, QPushButton, QVBoxLayout, QHBoxLayout, QLabel, QWidget, QMessageBox
 from PySide6.QtGui import QPixmap, QPainter, QImage, QColorConstants, QColor
 import sys
@@ -14,6 +14,13 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle("SimHShifter-Configurator")
 
+        self.open_serial_port()
+
+        self.gear_position = {}
+        for gear in ["1", "2", "3", "4", "5", "6", "R", "N"]:
+            position = self.serial_exec_command("get " + gear).split(" ")
+            self.gear_position[gear] = [int(position[0]), int(position[1])]
+
         layout = QHBoxLayout()
         layout.addWidget(self.create_gear_position_display())
         layout.addLayout(self.create_gear_table_layout())
@@ -21,47 +28,84 @@ class MainWindow(QMainWindow):
         widget = QWidget()
         widget.setLayout(layout)
         self.setCentralWidget(widget)
+
+        update_timer = QTimer(self)
+        update_timer.timeout.connect(self.update_gear_display)
+        update_timer.start(50)
     
     def create_gear_table_layout(self):
         layout = QVBoxLayout()
         
-        for gear in ["1", "2", "3", "4", "5", "6", "R"]:
+        for gear in self.gear_position:
             layout2 = QHBoxLayout()
             layout2.addWidget(QLabel(gear))
-            layout2.addWidget(QLabel("x: 500"))
-            layout2.addWidget(QLabel("y: 2000"))
+
+            label_x = QLabel(f"x: {self.gear_position[gear][0]}")
+            label_y = QLabel(f"y: {self.gear_position[gear][1]}")
+            layout2.addWidget(label_x)
+            layout2.addWidget(label_y)
 
             button = QPushButton("Calibrate")
-            button.clicked.connect(partial(self.calibrate_clicked, gear))
+            button.clicked.connect(partial(self.calibrate_clicked, gear, label_x, label_y))
             layout2.addWidget(button)
 
             layout.addLayout(layout2)
+
+        flash_button = QPushButton("Write to Flash")
+        flash_button.clicked.connect(self.write_flash_clicked)
+        layout.addWidget(flash_button)
 
         layout.setContentsMargins(10, 10, 10, 10)
         return layout
 
     def create_gear_position_display(self):
-        canvas = QImage(400, 300, QImage.Format_ARGB32)
-        #canvas.fill(QColorConstants.Transparent)
-        canvas.fill(QColor(210, 210, 210))
-        painter = QPainter(canvas)
-        painter.setRenderHint(QPainter.Antialiasing)
+        self.canvas = QImage(400, 300, QImage.Format_RGB32)
+        self.canvas_label = QLabel()
+        self.update_gear_display()
+        return self.canvas_label
 
-        for gear, pos_x, pos_y in [("1", 50, 50), ("2", 50, 250), ("3", 100, 50), ("4", 100, 250), ("5", 150, 50), ("6", 150, 250), ("R", 16, 50)]:
-            painter.drawPoint(pos_x, pos_y)
-            pos_x -= 16
-            pos_y -= 16
+    def update_gear_display(self):
+        painter = QPainter(self.canvas)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.canvas.rect(), QColor(225, 225, 225))
+
+        min_x = min(pos[0] for pos in self.gear_position.values())
+        min_y = min(-pos[1] for pos in self.gear_position.values())
+        max_x = max(pos[0] for pos in self.gear_position.values())
+        max_y = max(-pos[1] for pos in self.gear_position.values())
+
+        for gear in self.gear_position:
+            pos_x = (self.gear_position[gear][0] - min_x) / (max_x - min_x) * 300 + 50 - 16
+            pos_y = (-self.gear_position[gear][1] - min_y) / (max_y - min_y) * 200 + 50 - 16
             painter.drawText(QRect(pos_x, pos_y, 32, 32), Qt.AlignCenter, gear)
             painter.drawArc(pos_x, pos_y, 32, 32, 0, 16 * 360)
-        painter.end()
 
-        label = QLabel()
-        label.setPixmap(QPixmap.fromImage(canvas))
-        return label
-    
-    def calibrate_clicked(self, gear):
-        print("clicked", gear)
-    
+        position = self.serial_exec_command("get pos", debug=False).split(" ")
+        self.current_pos = [int(position[0]), int(position[1])]
+        pos_x = (self.current_pos[0] - min_x) / (max_x - min_x) * 300 + 50 - 16
+        pos_y = (-self.current_pos[1] - min_y) / (max_y - min_y) * 200 + 50 - 16
+        painter.drawText(QRect(pos_x, pos_y, 32, 32), Qt.AlignCenter, "+")
+        painter.drawArc(pos_x, pos_y, 32, 32, 0, 16 * 360)
+
+        painter.end()
+        self.canvas_label.setPixmap(QPixmap.fromImage(self.canvas))
+
+    def calibrate_clicked(self, gear, label_x, label_y):
+        self.serial_exec_command("set " + gear, "ok")
+        position = self.serial_exec_command("get " + gear).split(" ")
+        self.gear_position[gear] = [int(position[0]), int(position[1])]
+        label_x.setText(f"x: {position[0]}")
+        label_y.setText(f"y: {position[1]}")
+
+    def write_flash_clicked(self):
+        out = self.serial_exec_command("write flash", "ok")
+        if out == "ok":
+            dialog = QMessageBox()
+            dialog.setWindowTitle("Success")
+            dialog.setIcon(QMessageBox.Information)
+            dialog.setText("Write to flash ok")
+            dialog.exec()
+
     def open_serial_port(self):
         port_list = list(serial.tools.list_ports.comports())
         found_str = ""
@@ -86,9 +130,23 @@ class MainWindow(QMainWindow):
             sys.exit(1)
         
         self.serial = serial.Serial(selected_port, 9600, 8, "N", timeout=1)
-        self.serial.write(b"test\n")
-        print("read", self.serial.readline().decode("utf-8"))
-        print("read", self.serial.readline().decode("utf-8"))
+        self.serial_exec_command("test", "ok")
+
+    def serial_exec_command(self, cmd: str, expected="", debug=True):
+        cmd = cmd.encode()
+        expected = expected.encode()
+        self.serial.write(cmd + b"\n")
+        _echo = self.serial.readline().strip()
+        out = self.serial.readline().strip()
+        if debug:
+            print(f"executed: {cmd.ljust(16)} - received: {out}")
+        if (expected != b"" and out != expected) or len(out) == 0:
+            dialog = QMessageBox()
+            dialog.setWindowTitle("Error")
+            dialog.setIcon(QMessageBox.Critical)
+            dialog.setText(f"ERROR: Failed to execute serial command {cmd}\nresult: {out}\nexpected: {expected}")
+            dialog.exec()
+        return out.decode()
 
 
 if __name__ == "__main__":
@@ -96,7 +154,5 @@ if __name__ == "__main__":
 
     window = MainWindow()
     window.show()
-
-    window.open_serial_port()
 
     app.exec()
