@@ -287,6 +287,9 @@ int main(void)
   };
   tusb_init(0, &dev_init);
 
+  uint8_t gear_prev_states[16] = {0};
+  uint8_t gear_prev_states_index = 0;
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -319,41 +322,54 @@ int main(void)
 		+ hshifter_config.gear_positions[4].x
 		+ hshifter_config.gear_positions[5].x) / 4;
 
-	hshifter_report_t hshifter_report = {0};
+	uint8_t button = 0;
 
 	if (analog_x < boundry_1)
 	{
 		if (analog_y > (hshifter_config.reverse_position.y + hshifter_config.neutral_position.y) / 2)
-			hshifter_report.buttons |= 1 << 7;
+			button = 7;
 	}
 	else if (analog_x < boundry_2)
 	{
 		if (analog_y > (hshifter_config.gear_positions[0].y + hshifter_config.neutral_position.y) / 2)
-			hshifter_report.buttons |= 1 << 1;
+			button = 1;
 		else if (analog_y < (hshifter_config.gear_positions[1].y + hshifter_config.neutral_position.y) / 2)
-			hshifter_report.buttons |= 1 << 2;
+			button = 2;
 	}
 	else if (analog_x < boundry_3)
 	{
 		if (analog_y > (hshifter_config.gear_positions[2].y + hshifter_config.neutral_position.y) / 2)
-			hshifter_report.buttons |= 1 << 3;
+			button = 3;
 		else if (analog_y < (hshifter_config.gear_positions[3].y + hshifter_config.neutral_position.y) / 2)
-			hshifter_report.buttons |= 1 << 4;
+			button = 4;
 	}
 	else
 	{
 		if (analog_y > (hshifter_config.gear_positions[4].y + hshifter_config.neutral_position.y) / 2)
-			hshifter_report.buttons |= 1 << 5;
+			button = 5;
 		else if (analog_y < (hshifter_config.gear_positions[5].y + hshifter_config.neutral_position.y) / 2)
-			hshifter_report.buttons |= 1 << 6;
+			button = 6;
 	}
 
-	// neutral
-	if (hshifter_report.buttons == 0)
-		hshifter_report.buttons = 1;
+	// shrani nekaj stanj za nazaj in potem poslji output samo
+	// ce so vsa ta nedavna stanja enaka
+	gear_prev_states[gear_prev_states_index] = button;
+	gear_prev_states_index = (gear_prev_states_index + 1) % ARRAY_SIZE(gear_prev_states);
 
-	if (tud_hid_ready())
+	bool output_stable = true;
+	for (int i = 0; i < ARRAY_SIZE(gear_prev_states); i++)
 	{
+		if (gear_prev_states[i] != button)
+		{
+			output_stable = false;
+			break;
+		}
+	}
+
+	if (tud_hid_ready() && output_stable)
+	{
+		hshifter_report_t hshifter_report;
+		hshifter_report.buttons = 1 << button;
 		tud_hid_report(REPORT_ID_HSHIFTER, (const void*)&hshifter_report, sizeof(hshifter_report_t));
 	}
 
