@@ -80,8 +80,7 @@ typedef struct __attribute__ ((packed)) {
 } hshifter_report_t;
 
 typedef struct {
-	uint16_t position_x;
-	uint16_t position_y;
+	uint16_t x, y;
 } gear_position_t;
 
 typedef struct {
@@ -166,41 +165,41 @@ void HandleCommand(const char* cmd)
 	{
 		int gear = cmd[4] - '1';
 		char buf[64];
-		snprintf(buf, sizeof(buf), "%u %u\n", hshifter_config.gear_positions[gear].position_x,
-				hshifter_config.gear_positions[gear].position_y);
+		snprintf(buf, sizeof(buf), "%u %u\n", hshifter_config.gear_positions[gear].x,
+				hshifter_config.gear_positions[gear].y);
 		tud_cdc_write_str(buf);
 	}
 	else if (strcmp(cmd, "get R") == 0)
 	{
 		char buf[64];
-		snprintf(buf, sizeof(buf), "%u %u\n", hshifter_config.reverse_position.position_x,
-				hshifter_config.reverse_position.position_y);
+		snprintf(buf, sizeof(buf), "%u %u\n", hshifter_config.reverse_position.x,
+				hshifter_config.reverse_position.y);
 		tud_cdc_write_str(buf);
 	}
 	else if (strcmp(cmd, "get N") == 0)
 	{
 		char buf[64];
-		snprintf(buf, sizeof(buf), "%u %u\n", hshifter_config.neutral_position.position_x,
-			hshifter_config.neutral_position.position_y);
+		snprintf(buf, sizeof(buf), "%u %u\n", hshifter_config.neutral_position.x,
+			hshifter_config.neutral_position.y);
 		tud_cdc_write_str(buf);
 	}
 	else if (strncmp(cmd, "set ", 4) == 0 && cmd[4] >= '1' && cmd[4] <= '6' && cmd[5] == '\0')
 	{
 		int gear = cmd[4] - '1';
-		hshifter_config.gear_positions[gear].position_x = analog_x;
-		hshifter_config.gear_positions[gear].position_y = analog_y;
+		hshifter_config.gear_positions[gear].x = analog_x;
+		hshifter_config.gear_positions[gear].y = analog_y;
 		tud_cdc_write_str("ok\n");
 	}
 	else if (strcmp(cmd, "set R") == 0)
 	{
-		hshifter_config.reverse_position.position_x = analog_x;
-		hshifter_config.reverse_position.position_y = analog_y;
+		hshifter_config.reverse_position.x = analog_x;
+		hshifter_config.reverse_position.y = analog_y;
 		tud_cdc_write_str("ok\n");
 	}
 	else if (strcmp(cmd, "set N") == 0)
 	{
-		hshifter_config.neutral_position.position_x = analog_x;
-		hshifter_config.neutral_position.position_y = analog_y;
+		hshifter_config.neutral_position.x = analog_x;
+		hshifter_config.neutral_position.y = analog_y;
 		tud_cdc_write_str("ok\n");
 	}
 	else if (strcmp(cmd, "test") == 0)
@@ -297,31 +296,73 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	for (int i = 0; i < 7; i++)
+	analog_x = AnalogRead(ADC_CHANNEL_1, 16);
+	analog_y = AnalogRead(ADC_CHANNEL_0, 16);
+
+	/*
+			R   |  1  |   3  |  5
+			    |     |      |
+			    |  2  |   4  |  6
+			    |     |      |
+			boundry_1 |   boundry_3
+			      boundry_2
+	 */
+	uint32_t boundry_1 = (hshifter_config.reverse_position.x * 2
+		+ hshifter_config.gear_positions[0].x
+		+ hshifter_config.gear_positions[1].x) / 4;
+	uint32_t boundry_2 = (hshifter_config.gear_positions[0].x
+		+ hshifter_config.gear_positions[1].x
+		+ hshifter_config.gear_positions[2].x
+		+ hshifter_config.gear_positions[3].x) / 4;
+	uint32_t boundry_3 = (hshifter_config.gear_positions[2].x
+		+ hshifter_config.gear_positions[3].x
+		+ hshifter_config.gear_positions[4].x
+		+ hshifter_config.gear_positions[5].x) / 4;
+
+	hshifter_report_t hshifter_report = {0};
+
+	if (analog_x < boundry_1)
 	{
-		hshifter_report_t hshifter_report;
-		hshifter_report.buttons = 1 << i;
-
-		analog_x = AnalogRead(ADC_CHANNEL_1, 16);
-		analog_y = AnalogRead(ADC_CHANNEL_0, 16);
-
-		if (analog_x > (1 << 12) / 2)
-			hshifter_report.buttons |= 1;
-		if (analog_y > (1 << 12) / 2)
-			hshifter_report.buttons |= 2;
-
-		if (tud_hid_ready())
-		{
-			tud_hid_report(REPORT_ID_HSHIFTER, (const void*)&hshifter_report, sizeof(hshifter_report_t));
-		}
-
-		if (tud_cdc_connected() && tud_cdc_available())
-		{
-			HandleCDCInput();
-		}
-
-		tud_task();
+		if (analog_y > (hshifter_config.reverse_position.y + hshifter_config.neutral_position.y) / 2)
+			hshifter_report.buttons |= 1 << 7;
 	}
+	else if (analog_x < boundry_2)
+	{
+		if (analog_y > (hshifter_config.gear_positions[0].y + hshifter_config.neutral_position.y) / 2)
+			hshifter_report.buttons |= 1 << 1;
+		else if (analog_y < (hshifter_config.gear_positions[1].y + hshifter_config.neutral_position.y) / 2)
+			hshifter_report.buttons |= 1 << 2;
+	}
+	else if (analog_x < boundry_3)
+	{
+		if (analog_y > (hshifter_config.gear_positions[2].y + hshifter_config.neutral_position.y) / 2)
+			hshifter_report.buttons |= 1 << 3;
+		else if (analog_y < (hshifter_config.gear_positions[3].y + hshifter_config.neutral_position.y) / 2)
+			hshifter_report.buttons |= 1 << 4;
+	}
+	else
+	{
+		if (analog_y > (hshifter_config.gear_positions[4].y + hshifter_config.neutral_position.y) / 2)
+			hshifter_report.buttons |= 1 << 5;
+		else if (analog_y < (hshifter_config.gear_positions[5].y + hshifter_config.neutral_position.y) / 2)
+			hshifter_report.buttons |= 1 << 6;
+	}
+
+	// neutral
+	if (hshifter_report.buttons == 0)
+		hshifter_report.buttons = 1;
+
+	if (tud_hid_ready())
+	{
+		tud_hid_report(REPORT_ID_HSHIFTER, (const void*)&hshifter_report, sizeof(hshifter_report_t));
+	}
+
+	if (tud_cdc_connected() && tud_cdc_available())
+	{
+		HandleCDCInput();
+	}
+
+	tud_task();
   }
   /* USER CODE END 3 */
 }
