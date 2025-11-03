@@ -114,7 +114,7 @@ class MainWindow(QMainWindow):
         self.position_labels[gear][1].setText(f"y: {position[1]}")
 
     def write_flash_clicked(self):
-        out = self.serial_exec_command("write flash", "ok")
+        out = self.serial_exec_command("flash write", "ok")
         if out == "ok":
             dialog = QMessageBox()
             dialog.setWindowTitle("Success")
@@ -123,7 +123,7 @@ class MainWindow(QMainWindow):
             dialog.exec()
 
     def read_flash_clicked(self):
-        out = self.serial_exec_command("read flash", "ok")
+        out = self.serial_exec_command("flash read", "ok")
         if out != "ok":
             return
 

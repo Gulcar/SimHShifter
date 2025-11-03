@@ -47,6 +47,8 @@
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
 
+CRC_HandleTypeDef hcrc;
+
 PCD_HandleTypeDef hpcd_USB_FS;
 
 /* USER CODE BEGIN PV */
@@ -101,7 +103,11 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_USB_PCD_Init(void);
+static void MX_CRC_Init(void);
 /* USER CODE BEGIN PFP */
+
+bool FlashWriteConfig(const hshifter_config_t* config);
+bool FlashReadConfig(hshifter_config_t* out_config);
 
 /* USER CODE END PFP */
 
@@ -202,6 +208,22 @@ void HandleCommand(const char* cmd)
 		hshifter_config.neutral_position.y = analog_y;
 		tud_cdc_write_str("ok\n");
 	}
+	else if (strcmp(cmd, "flash write") == 0)
+	{
+		bool success = FlashWriteConfig(&hshifter_config);
+		if (success)
+			tud_cdc_write_str("ok\n");
+		else
+			tud_cdc_write_str("unknown error\n");
+	}
+	else if (strcmp(cmd, "flash read") == 0)
+	{
+		bool success = FlashReadConfig(&hshifter_config);
+		if (success)
+			tud_cdc_write_str("ok\n");
+		else
+			tud_cdc_write_str("unknown error\n");
+	}
 	else if (strcmp(cmd, "test") == 0)
 	{
 		tud_cdc_write_str("ok\n");
@@ -244,6 +266,56 @@ void HandleCDCInput()
 	}
 }
 
+#define CONFIG_FLASH_PAGE_ADDR   (FLASH_BANK1_END - FLASH_PAGE_SIZE + 1) // last 1 KB page
+
+bool FlashWriteConfig(const hshifter_config_t* config)
+{
+	HAL_FLASH_Unlock();
+
+	FLASH_EraseInitTypeDef erase_def = {
+		.TypeErase = FLASH_TYPEERASE_PAGES,
+		.PageAddress = CONFIG_FLASH_PAGE_ADDR,
+		.NbPages = 1
+	};
+	uint32_t page_error = 0;
+	HAL_StatusTypeDef status = HAL_FLASHEx_Erase(&erase_def, &page_error);
+	if (status != HAL_OK || page_error != 0xFFFFFFFF)
+	{
+		HAL_FLASH_Lock();
+		return false; // failed
+	}
+
+	uint32_t addr = CONFIG_FLASH_PAGE_ADDR;
+	for (uint32_t i = 0; i < sizeof(hshifter_config_t) / 4; i++)
+	{
+		HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, addr, ((uint32_t*)config)[i]);
+		addr += 4;
+	}
+
+	// Velikost configa mora biti veckratnik 4
+	uint32_t crc = HAL_CRC_Calculate(&hcrc, (uint32_t*)config, sizeof(hshifter_config_t) / 4);
+	HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, addr, crc);
+
+	HAL_FLASH_Lock();
+	return true;
+}
+
+bool FlashReadConfig(hshifter_config_t* out_config)
+{
+	hshifter_config_t config = {0};
+	memcpy(&config, (void*)CONFIG_FLASH_PAGE_ADDR, sizeof(hshifter_config_t));
+
+	uint32_t crc = HAL_CRC_Calculate(&hcrc, (uint32_t*)&config, sizeof(hshifter_config_t) / 4);
+	uint32_t crc_stored = *(uint32_t*)(CONFIG_FLASH_PAGE_ADDR + sizeof(hshifter_config_t));
+
+	if (crc == crc_stored)
+	{
+		*out_config = config;
+		return true;
+	}
+	return false;
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -277,9 +349,12 @@ int main(void)
   MX_GPIO_Init();
   MX_ADC1_Init();
   MX_USB_PCD_Init();
+  MX_CRC_Init();
   /* USER CODE BEGIN 2 */
 
   HAL_ADCEx_Calibration_Start(&hadc1);
+
+  FlashReadConfig(&hshifter_config);
 
   tusb_rhport_init_t dev_init = {
    .role = TUSB_ROLE_DEVICE,
@@ -474,6 +549,32 @@ static void MX_ADC1_Init(void)
   /* USER CODE BEGIN ADC1_Init 2 */
 
   /* USER CODE END ADC1_Init 2 */
+
+}
+
+/**
+  * @brief CRC Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_CRC_Init(void)
+{
+
+  /* USER CODE BEGIN CRC_Init 0 */
+
+  /* USER CODE END CRC_Init 0 */
+
+  /* USER CODE BEGIN CRC_Init 1 */
+
+  /* USER CODE END CRC_Init 1 */
+  hcrc.Instance = CRC;
+  if (HAL_CRC_Init(&hcrc) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN CRC_Init 2 */
+
+  /* USER CODE END CRC_Init 2 */
 
 }
 
