@@ -29,12 +29,16 @@ class MainWindow(QMainWindow):
         widget.setLayout(layout)
         self.setCentralWidget(widget)
 
+        self.setFixedSize(self.minimumSize())
+
         update_timer = QTimer(self)
         update_timer.timeout.connect(self.update_gear_display)
         update_timer.start(50)
     
     def create_gear_table_layout(self):
         layout = QVBoxLayout()
+
+        self.position_labels = {}
         
         for gear in self.gear_position:
             layout2 = QHBoxLayout()
@@ -42,11 +46,12 @@ class MainWindow(QMainWindow):
 
             label_x = QLabel(f"x: {self.gear_position[gear][0]}")
             label_y = QLabel(f"y: {self.gear_position[gear][1]}")
+            self.position_labels[gear] = [label_x, label_y]
             layout2.addWidget(label_x)
             layout2.addWidget(label_y)
 
             button = QPushButton("Calibrate")
-            button.clicked.connect(partial(self.calibrate_clicked, gear, label_x, label_y))
+            button.clicked.connect(partial(self.calibrate_clicked, gear))
             layout2.addWidget(button)
 
             layout.addLayout(layout2)
@@ -54,6 +59,10 @@ class MainWindow(QMainWindow):
         flash_button = QPushButton("Write to Flash")
         flash_button.clicked.connect(self.write_flash_clicked)
         layout.addWidget(flash_button)
+
+        read_flash_button = QPushButton("Read from Flash")
+        read_flash_button.clicked.connect(self.read_flash_clicked)
+        layout.addWidget(read_flash_button)
 
         layout.setContentsMargins(10, 10, 10, 10)
         return layout
@@ -65,6 +74,8 @@ class MainWindow(QMainWindow):
         return self.canvas_label
 
     def update_gear_display(self):
+        if self.isMinimized():
+            return
         painter = QPainter(self.canvas)
         painter.setRenderHint(QPainter.Antialiasing)
         painter.fillRect(self.canvas.rect(), QColor(225, 225, 225))
@@ -73,6 +84,11 @@ class MainWindow(QMainWindow):
         min_y = min(-pos[1] for pos in self.gear_position.values())
         max_x = max(pos[0] for pos in self.gear_position.values())
         max_y = max(-pos[1] for pos in self.gear_position.values())
+
+        if max_x == min_x:
+            max_x += 1
+        if max_y == min_y:
+            max_y += 1
 
         for gear in self.gear_position:
             pos_x = (self.gear_position[gear][0] - min_x) / (max_x - min_x) * 300 + 50 - 16
@@ -90,12 +106,12 @@ class MainWindow(QMainWindow):
         painter.end()
         self.canvas_label.setPixmap(QPixmap.fromImage(self.canvas))
 
-    def calibrate_clicked(self, gear, label_x, label_y):
+    def calibrate_clicked(self, gear):
         self.serial_exec_command("set " + gear, "ok")
         position = self.serial_exec_command("get " + gear).split(" ")
         self.gear_position[gear] = [int(position[0]), int(position[1])]
-        label_x.setText(f"x: {position[0]}")
-        label_y.setText(f"y: {position[1]}")
+        self.position_labels[gear][0].setText(f"x: {position[0]}")
+        self.position_labels[gear][1].setText(f"y: {position[1]}")
 
     def write_flash_clicked(self):
         out = self.serial_exec_command("write flash", "ok")
@@ -105,6 +121,23 @@ class MainWindow(QMainWindow):
             dialog.setIcon(QMessageBox.Information)
             dialog.setText("Write to flash ok")
             dialog.exec()
+
+    def read_flash_clicked(self):
+        out = self.serial_exec_command("read flash", "ok")
+        if out != "ok":
+            return
+
+        for gear in self.gear_position:
+            position = self.serial_exec_command("get " + gear).split(" ")
+            self.gear_position[gear] = [int(position[0]), int(position[1])]
+            self.position_labels[gear][0].setText(f"x: {position[0]}")
+            self.position_labels[gear][1].setText(f"y: {position[1]}")
+
+        dialog = QMessageBox()
+        dialog.setWindowTitle("Success")
+        dialog.setIcon(QMessageBox.Information)
+        dialog.setText("Read from flash ok")
+        dialog.exec()
 
     def open_serial_port(self):
         port_list = list(serial.tools.list_ports.comports())
