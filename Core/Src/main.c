@@ -445,6 +445,8 @@ int main(void)
 	{
 		hshifter_report_t hshifter_report;
 		hshifter_report.buttons = 1 << button;
+		if (button == 0)
+			hshifter_report.buttons = 0;
 		tud_hid_report(REPORT_ID_HSHIFTER, (const void*)&hshifter_report, sizeof(hshifter_report_t));
 	}
 
