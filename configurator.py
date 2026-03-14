@@ -1,5 +1,5 @@
 from PySide6.QtCore import QSize, Qt, QRect, QTimer
-from PySide6.QtWidgets import QApplication, QMainWindow, QPushButton, QVBoxLayout, QHBoxLayout, QLabel, QWidget, QMessageBox
+from PySide6.QtWidgets import QApplication, QMainWindow, QProgressBar, QPushButton, QVBoxLayout, QHBoxLayout, QLabel, QWidget, QMessageBox
 from PySide6.QtGui import QPixmap, QPainter, QImage, QColorConstants, QColor
 import sys
 from functools import partial
@@ -7,6 +7,8 @@ import serial, serial.tools.list_ports
 
 DEVICE_VID = 0xCafe
 DEVICE_PID = 0x4005
+
+HANDBRAKE_CALIBRATION_DEADZONE = 0.03
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -21,18 +23,26 @@ class MainWindow(QMainWindow):
             position = self.serial_exec_command("get " + gear).split(" ")
             self.gear_position[gear] = [int(position[0]), int(position[1])]
 
-        layout = QHBoxLayout()
-        layout.addWidget(self.create_gear_position_display())
-        layout.addLayout(self.create_gear_table_layout())
+        # TODO: dobi min, max handbrake output
+        self.calibrating_handbrake = False
+
+        layoutH = QHBoxLayout()
+        layoutH.addWidget(self.create_gear_position_display())
+        layoutH.addLayout(self.create_gear_table_layout())
+
+        layoutV = QVBoxLayout()
+        layoutV.addLayout(layoutH)
+        layoutV.addWidget(self.create_handbrake_layout())
 
         widget = QWidget()
-        widget.setLayout(layout)
+        widget.setLayout(layoutV)
         self.setCentralWidget(widget)
 
         self.setFixedSize(self.minimumSize())
 
         update_timer = QTimer(self)
         update_timer.timeout.connect(self.update_gear_display)
+        update_timer.timeout.connect(self.update_handbrake_bars)
         update_timer.start(50)
     
     def create_gear_table_layout(self):
@@ -42,7 +52,7 @@ class MainWindow(QMainWindow):
         
         for gear in self.gear_position:
             layout2 = QHBoxLayout()
-            layout2.addWidget(QLabel(gear))
+            layout2.addWidget(QLabel("<b>" + gear + "</b>"))
 
             label_x = QLabel(f"x: {self.gear_position[gear][0]}")
             label_y = QLabel(f"y: {self.gear_position[gear][1]}")
@@ -66,6 +76,67 @@ class MainWindow(QMainWindow):
 
         layout.setContentsMargins(10, 10, 10, 10)
         return layout
+
+    def create_handbrake_layout(self):
+        layout = QVBoxLayout()
+        layout.setSpacing(0)
+
+        layoutH = QHBoxLayout()
+        layoutH.setSpacing(10)
+        layoutH.addWidget(QLabel("<b>Handbrake:</b>"))
+        calibrate_button = QPushButton("Calibrate")
+        calibrate_button.clicked.connect(partial(self.calibrate_handbrake_clicked, calibrate_button))
+
+        layoutH.addWidget(calibrate_button)
+        layoutH.addWidget(QLabel(f"(calibration deadzone: {HANDBRAKE_CALIBRATION_DEADZONE*100}%)"))
+        layoutH.addStretch(1)
+
+        layout.addLayout(layoutH)
+        layout.addSpacing(5)
+
+        self.handbrake_bar_raw, bar_raw_layout = self.create_handbrake_progress_bar("raw:")
+        layout.addLayout(bar_raw_layout)
+
+        self.handbrake_bar_out, bar_out_layout = self.create_handbrake_progress_bar("out:")
+        self.handbrake_bar_out.setStyleSheet("QProgressBar::chunk { background-color: #ff5c5c; }")
+        layout.addLayout(bar_out_layout)
+
+        widget = QWidget()
+        widget.setLayout(layout)
+        widget.setStyleSheet("""
+            QProgressBar {
+                background-color: #EEE;
+            }
+            QProgressBar::chunk {
+                background-color: #4CAF50; /* The fill color */
+                width: 1px; /* Makes the fill look smooth */
+            }
+        """)
+        return widget
+
+    def create_handbrake_progress_bar(self, text):
+        layout = QHBoxLayout()
+        label = QLabel(text)
+        label.setFixedWidth(30)
+        layout.addWidget(label)
+
+        bar = QProgressBar()
+        bar.setRange(0, 4095)
+        bar.setValue(0)
+        bar.setAlignment(Qt.AlignCenter)
+        bar.setFormat(f"%v/{bar.maximum()} (%p%)")
+        layout.addWidget(bar)
+
+        return bar, layout
+
+    def calibrate_handbrake_clicked(self, calibrate_button):
+        calibrate_button.setText("Calibrate" if self.calibrating_handbrake else "Stop calib.")
+        self.calibrating_handbrake = not self.calibrating_handbrake
+
+    def update_handbrake_bars(self):
+        # TODO: if calibrating: update min, max (also using deadzone)
+        # update bars
+        return
 
     def create_gear_position_display(self):
         self.canvas = QImage(400, 300, QImage.Format_RGB32)
