@@ -86,7 +86,7 @@ uint8_t const * tud_descriptor_device_cb(void)
   HID_COLLECTION ( HID_COLLECTION_APPLICATION )                 ,\
     /* Report ID if any */\
     __VA_ARGS__ \
-    /* 32 bit Button Map */ \
+    /* 8 bit Button Map */ \
     HID_USAGE_PAGE     ( HID_USAGE_PAGE_BUTTON                  ) ,\
     HID_USAGE_MIN      ( 1                                      ) ,\
     HID_USAGE_MAX      ( 8                                      ) ,\
@@ -95,6 +95,18 @@ uint8_t const * tud_descriptor_device_cb(void)
     HID_REPORT_COUNT   ( 8                                      ) ,\
     HID_REPORT_SIZE    ( 1                                      ) ,\
     HID_INPUT          ( HID_DATA | HID_VARIABLE | HID_ABSOLUTE ) ,\
+	/* Analog X-Axis (12-bit) */\
+    HID_USAGE_PAGE     ( HID_USAGE_PAGE_DESKTOP                 ) ,\
+    HID_USAGE          ( HID_USAGE_DESKTOP_X                    ) ,\
+    HID_LOGICAL_MIN    ( 0                                      ) ,\
+    HID_LOGICAL_MAX_N  ( 4095, 2                                ) ,\
+    HID_REPORT_COUNT   ( 1                                      ) ,\
+    HID_REPORT_SIZE    ( 12                                     ) ,\
+    HID_INPUT          ( HID_DATA | HID_VARIABLE | HID_ABSOLUTE ) ,\
+    /* Padding (4 bits to align) */ \
+    HID_REPORT_COUNT   ( 1                                      ) ,\
+    HID_REPORT_SIZE    ( 4                                      ) ,\
+    HID_INPUT          ( HID_CONSTANT                           ) ,\
   HID_COLLECTION_END \
 
 

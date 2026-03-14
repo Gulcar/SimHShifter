@@ -79,6 +79,7 @@ PCD_HandleTypeDef hpcd_USB_FS;
 
 typedef struct __attribute__ ((packed)) {
 	uint8_t buttons;
+	uint16_t axis_x;
 } hshifter_report_t;
 
 typedef struct {
@@ -89,12 +90,16 @@ typedef struct {
 	gear_position_t gear_positions[6];
 	gear_position_t reverse_position;
 	gear_position_t neutral_position;
+	uint16_t axis_x_min;
+	uint16_t axis_x_max;
 } hshifter_config_t;
 
 hshifter_config_t hshifter_config = {0};
 
 uint32_t analog_x = 0;
 uint32_t analog_y = 0;
+uint32_t current_axis_x = 0;
+uint16_t mapped_axis_x = 0;
 
 /* USER CODE END PV */
 
@@ -115,7 +120,7 @@ bool FlashReadConfig(hshifter_config_t* out_config);
 /* USER CODE BEGIN 0 */
 
 // input_channel mora biti ADC_CHANNEL_X
-uint32_t AnalogRead(uint32_t input_channel, uint32_t samples)
+uint32_t AnalogRead(ADC_HandleTypeDef* hadc, uint32_t input_channel, uint32_t samples)
 {
 	// da smo prijazni
 	assert(input_channel >= ADC_CHANNEL_0 && input_channel <= ADC_CHANNEL_15);
@@ -127,14 +132,14 @@ uint32_t AnalogRead(uint32_t input_channel, uint32_t samples)
 		.SamplingTime = ADC_SAMPLETIME_7CYCLES_5,
 	};
 
-	HAL_ADC_ConfigChannel(&hadc1, &adc_channel_conf);
+	HAL_ADC_ConfigChannel(hadc, &adc_channel_conf);
 
 	uint32_t sum = 0;
 	for (uint32_t i = 0; i < samples; i++)
 	{
-		HAL_ADC_Start(&hadc1);
-		HAL_ADC_PollForConversion(&hadc1, 1);
-		sum += HAL_ADC_GetValue(&hadc1);
+		HAL_ADC_Start(hadc);
+		HAL_ADC_PollForConversion(hadc, 1);
+		sum += HAL_ADC_GetValue(hadc);
 	}
 
 	return sum / samples;
@@ -188,6 +193,24 @@ void HandleCommand(const char* cmd)
 		snprintf(buf, sizeof(buf), "%u %u\n", hshifter_config.neutral_position.x,
 			hshifter_config.neutral_position.y);
 		tud_cdc_write_str(buf);
+	}
+	else if (strcmp(cmd, "get HB") == 0)
+	{
+		char buf[64];
+		snprintf(buf, sizeof(buf), "%lu %u\n", current_axis_x, mapped_axis_x);
+		tud_cdc_write_str(buf);
+	}
+	else if (strncmp(cmd, "set HB ", 7) == 0)
+	{
+		int read = sscanf(cmd + 7, "%hu %hu", &hshifter_config.axis_x_min, &hshifter_config.axis_x_max);
+		if (read == 2)
+			tud_cdc_write_str("ok\n");
+		else
+		{
+			char buf[64];
+			snprintf(buf, sizeof(buf), "invalid input '%s'\n", cmd);
+			tud_cdc_write_str(buf);
+		}
 	}
 	else if (strncmp(cmd, "set ", 4) == 0 && cmd[4] >= '1' && cmd[4] <= '6' && cmd[5] == '\0')
 	{
@@ -292,7 +315,8 @@ bool FlashWriteConfig(const hshifter_config_t* config)
 		addr += 4;
 	}
 
-	// Velikost configa mora biti veckratnik 4
+	_Static_assert(sizeof(hshifter_config_t) % 4 == 0, "Velikost configa mora biti veckratnik 4");
+
 	uint32_t crc = HAL_CRC_Calculate(&hcrc, (uint32_t*)config, sizeof(hshifter_config_t) / 4);
 	HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, addr, crc);
 
@@ -353,6 +377,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
 
   HAL_ADCEx_Calibration_Start(&hadc1);
+  // TODO: se za hadc2
 
   FlashReadConfig(&hshifter_config);
 
@@ -362,6 +387,7 @@ int main(void)
   };
   tusb_init(0, &dev_init);
 
+  uint8_t current_gear = 0;
   uint8_t gear_prev_states[16] = {0};
   uint8_t gear_prev_states_index = 0;
 
@@ -374,8 +400,8 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	analog_x = AnalogRead(ADC_CHANNEL_1, 16);
-	analog_y = AnalogRead(ADC_CHANNEL_0, 16);
+	analog_x = AnalogRead(&hadc1, ADC_CHANNEL_1, 16);
+	analog_y = AnalogRead(&hadc1, ADC_CHANNEL_0, 16);
 
 	/*
 			R   |  1  |   3  |  5
@@ -441,12 +467,23 @@ int main(void)
 		}
 	}
 
-	if (tud_hid_ready() && output_stable)
+
+
+	if (tud_hid_ready())
 	{
+		if (output_stable)
+			current_gear = button;
+
+		// TODO: read + map
+		//current_axis_x = AnalogRead(&hadc2, ADC_CHANNEL_0, 16);
+		mapped_axis_x = ((current_axis_x - hshifter_config.axis_x_min) * 4095) / (hshifter_config.axis_x_max - hshifter_config.axis_x_min);
+
 		hshifter_report_t hshifter_report;
-		hshifter_report.buttons = 1 << button;
-		if (button == 0)
+		hshifter_report.buttons = 1 << current_gear;
+		if (current_gear == 0)
 			hshifter_report.buttons = 0;
+		hshifter_report.axis_x = mapped_axis_x;
+
 		tud_hid_report(REPORT_ID_HSHIFTER, (const void*)&hshifter_report, sizeof(hshifter_report_t));
 	}
 
