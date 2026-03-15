@@ -8,7 +8,7 @@ import serial, serial.tools.list_ports
 DEVICE_VID = 0xCafe
 DEVICE_PID = 0x4005
 
-HANDBRAKE_CALIBRATION_DEADZONE = 0.03
+HANDBRAKE_CALIBRATION_DEADZONE = 0.05
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -23,8 +23,9 @@ class MainWindow(QMainWindow):
             position = self.serial_exec_command("get " + gear).split(" ")
             self.gear_position[gear] = [int(position[0]), int(position[1])]
 
-        # TODO: dobi min, max handbrake output
         self.calibrating_handbrake = False
+        self.calibrating_handbrake_min = 4095
+        self.calibrating_handbrake_max = 0
 
         layoutH = QHBoxLayout()
         layoutH.addWidget(self.create_gear_position_display())
@@ -131,12 +132,37 @@ class MainWindow(QMainWindow):
 
     def calibrate_handbrake_clicked(self, calibrate_button):
         calibrate_button.setText("Calibrate" if self.calibrating_handbrake else "Stop calib.")
+
+        if self.calibrating_handbrake:
+            range = self.calibrating_handbrake_max - self.calibrating_handbrake_min
+            deadzone = round(range * HANDBRAKE_CALIBRATION_DEADZONE)
+            hb_min = self.calibrating_handbrake_min + deadzone
+            hb_max = self.calibrating_handbrake_max - deadzone
+
+            if hb_min < hb_max:
+                self.serial_exec_command(f"set HB {hb_min} {hb_max}", "ok")
+            else:
+                dialog = QMessageBox()
+                dialog.setWindowTitle("Error")
+                dialog.setIcon(QMessageBox.Critical)
+                dialog.setText(f"ERROR: Failed to get handbrake minimum and maximum output range (min: {self.calibrating_handbrake_min}, max: {self.calibrating_handbrake_max})")
+                dialog.exec()
+
         self.calibrating_handbrake = not self.calibrating_handbrake
+        self.calibrating_handbrake_min = 4095
+        self.calibrating_handbrake_max = 0
 
     def update_handbrake_bars(self):
-        # TODO: if calibrating: update min, max (also using deadzone)
-        # update bars
-        return
+        hb_values = self.serial_exec_command("get HB", "", False).split(" ")
+        hb_raw = int(hb_values[0])
+        hb_out = int(hb_values[1])
+
+        self.handbrake_bar_raw.setValue(hb_raw)
+        self.handbrake_bar_out.setValue(hb_out)
+
+        if self.calibrating_handbrake:
+            self.calibrating_handbrake_min = min(self.calibrating_handbrake_min, hb_raw)
+            self.calibrating_handbrake_max = max(self.calibrating_handbrake_max, hb_raw)
 
     def create_gear_position_display(self):
         self.canvas = QImage(400, 300, QImage.Format_RGB32)

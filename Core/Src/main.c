@@ -46,6 +46,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
+ADC_HandleTypeDef hadc2;
 
 CRC_HandleTypeDef hcrc;
 
@@ -109,6 +110,7 @@ static void MX_GPIO_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_USB_PCD_Init(void);
 static void MX_CRC_Init(void);
+static void MX_ADC2_Init(void);
 /* USER CODE BEGIN PFP */
 
 bool FlashWriteConfig(const hshifter_config_t* config);
@@ -374,10 +376,11 @@ int main(void)
   MX_ADC1_Init();
   MX_USB_PCD_Init();
   MX_CRC_Init();
+  MX_ADC2_Init();
   /* USER CODE BEGIN 2 */
 
   HAL_ADCEx_Calibration_Start(&hadc1);
-  // TODO: se za hadc2
+  HAL_ADCEx_Calibration_Start(&hadc2);
 
   FlashReadConfig(&hshifter_config);
 
@@ -390,6 +393,8 @@ int main(void)
   uint8_t current_gear = 0;
   uint8_t gear_prev_states[16] = {0};
   uint8_t gear_prev_states_index = 0;
+
+  bool handbrake_active = false;
 
   /* USER CODE END 2 */
 
@@ -468,15 +473,31 @@ int main(void)
 	}
 
 
+	uint32_t axis_raw = AnalogRead(&hadc2, ADC_CHANNEL_2, 16);
+	// Exponential moving average implementiran z integer arithmetic
+	const static uint32_t filter_level = 6;
+	static uint32_t estimate = 0;
+	// (estimate >> filter_level) je dejanski average, vsakic odstejemo avg in dodamo trenutno stanje
+	estimate = estimate - (estimate >> filter_level) + axis_raw;
+	current_axis_x = estimate >> filter_level;
+
 
 	if (tud_hid_ready())
 	{
 		if (output_stable)
 			current_gear = button;
 
-		// TODO: read + map
-		//current_axis_x = AnalogRead(&hadc2, ADC_CHANNEL_0, 16);
-		mapped_axis_x = ((current_axis_x - hshifter_config.axis_x_min) * 4095) / (hshifter_config.axis_x_max - hshifter_config.axis_x_min);
+		if (current_axis_x <= hshifter_config.axis_x_min)
+			mapped_axis_x = 0;
+		else if (current_axis_x >= hshifter_config.axis_x_max)
+			mapped_axis_x = 4095;
+		else
+			mapped_axis_x = ((current_axis_x - hshifter_config.axis_x_min) * 4095) / (hshifter_config.axis_x_max - hshifter_config.axis_x_min);
+
+		if (mapped_axis_x == 0)
+			handbrake_active = true; // ne posiljam handbrake signala dokler vsaj enkrat ne pade nivo na 0 (ce handbrake ni prikljucen vhod plava)
+		if (handbrake_active == false)
+			mapped_axis_x = 0;
 
 		hshifter_report_t hshifter_report;
 		hshifter_report.buttons = 1 << current_gear;
@@ -588,6 +609,53 @@ static void MX_ADC1_Init(void)
   /* USER CODE BEGIN ADC1_Init 2 */
 
   /* USER CODE END ADC1_Init 2 */
+
+}
+
+/**
+  * @brief ADC2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_ADC2_Init(void)
+{
+
+  /* USER CODE BEGIN ADC2_Init 0 */
+
+  /* USER CODE END ADC2_Init 0 */
+
+  ADC_ChannelConfTypeDef sConfig = {0};
+
+  /* USER CODE BEGIN ADC2_Init 1 */
+
+  /* USER CODE END ADC2_Init 1 */
+
+  /** Common config
+  */
+  hadc2.Instance = ADC2;
+  hadc2.Init.ScanConvMode = ADC_SCAN_DISABLE;
+  hadc2.Init.ContinuousConvMode = DISABLE;
+  hadc2.Init.DiscontinuousConvMode = DISABLE;
+  hadc2.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+  hadc2.Init.DataAlign = ADC_DATAALIGN_RIGHT;
+  hadc2.Init.NbrOfConversion = 1;
+  if (HAL_ADC_Init(&hadc2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Regular Channel
+  */
+  sConfig.Channel = ADC_CHANNEL_2;
+  sConfig.Rank = ADC_REGULAR_RANK_1;
+  sConfig.SamplingTime = ADC_SAMPLETIME_1CYCLE_5;
+  if (HAL_ADC_ConfigChannel(&hadc2, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN ADC2_Init 2 */
+
+  /* USER CODE END ADC2_Init 2 */
 
 }
 
