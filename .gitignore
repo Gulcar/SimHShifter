@@ -1,3 +1,5 @@
 /.settings/
 /Debug/
 /Release/
+
+/.venv/
