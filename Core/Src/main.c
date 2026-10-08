@@ -505,6 +505,10 @@ int main(void)
 			hshifter_report.buttons = 0;
 		hshifter_report.axis_x = mapped_axis_x;
 
+		// TODO: tako kot za button box bi preverjal ce je treba sploh updatat report ali je nujno poslat novega + force ce je tud_mount_cb ali tud_resume_cb
+		// baje da imam predolg loop in zato prevec casa med klici na tud_task (These tasks must be called regularly (typically less than 1ms intervals))
+		// mogoce tudi kaksna konfiguracija narobe ker STM32F103 does full speed not high speed
+
 		tud_hid_report(REPORT_ID_HSHIFTER, (const void*)&hshifter_report, sizeof(hshifter_report_t));
 	}
 

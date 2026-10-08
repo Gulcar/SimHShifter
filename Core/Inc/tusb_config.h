@@ -37,7 +37,7 @@
  // tole napisal js ker je pac treba
 #define CFG_TUSB_MCU OPT_MCU_STM32F1
 #define CFG_TUSB_OS OPT_OS_NONE
-#define CFG_TUSB_RHPORT0_MODE (OPT_MODE_DEVICE | OPT_MODE_HIGH_SPEED)
+#define CFG_TUSB_RHPORT0_MODE (OPT_MODE_DEVICE | OPT_MODE_FULL_SPEED)
 
 // RHPort number used for device can be defined by board.mk, default to port 0
 #ifndef BOARD_TUD_RHPORT
